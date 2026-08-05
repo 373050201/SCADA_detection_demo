@@ -1,5 +1,5 @@
 """
-执行器模块：模拟鼠标操作目标
+执行器模块：模拟鼠标操作执行各种具体动作
 """
 import pyautogui
 from PyQt5.QtCore import QPoint
@@ -59,9 +59,22 @@ class ActionExecutor:
         if isinstance(self.locator, OcrLocator):# 填充结束后清除缓存
             self.locator.clear_cache()
 
-    def click_ok_button(self, element_id: str, delay_before=0.3, dialog=None):
+    def click_ok_button(self, element_id: str="ok_button", delay_before=0.3, dialog=None):
         """点击对话框的“确定”按钮"""
         # Qt定位时，通知定位器当前对话框
+        if hasattr(self.locator, 'set_current_dialog'):
+            self.locator.set_current_dialog(dialog)
+            # 确保对话框处于激活状态
+            dialog.activateWindow()
+            dialog.raise_()
+            pyautogui.sleep(delay_before)
+
+        # 调用定位器单击元素的方法，element_id传入定位器
+        self.locator.click_at_element(element_id)
+
+    def click_lock_toggle_button(self, element_id: str="lock_toggle_button", delay_before=0.3, dialog=None):
+        """点击对话框的“加锁/解锁”按钮"""
+                # Qt定位时，通知定位器当前对话框
         if hasattr(self.locator, 'set_current_dialog'):
             self.locator.set_current_dialog(dialog)
             # 确保对话框处于激活状态

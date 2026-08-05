@@ -20,11 +20,12 @@ class YoloDataset(Dataset):
         self.img_folder = os.path.join("datasets", config["dataset_name"], "images", split)
         self.label_folder = os.path.join("datasets", config["dataset_name"], "labels", split)
         self.img_names = os.listdir(self.img_folder)
+        self.input_size=config["input_size"]
 
         if img_transform is None:  # 默认适应模型输入
             self.img_transform = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Resize((416, 416))
+                transforms.Resize((self.input_size, self.input_size))#原图适配模型输入
             ])
         elif img_transform == "no_transform":  # 不变换,返回原始图片
             self.img_transform = None
@@ -127,7 +128,7 @@ label={
         "bboxes":#预测框
     }
 """
-def create_yolo_target(label):#制作target,形状:[13,13,5,(4+1+C)],其中(4+1+C)包括(tx,ty,tw,th,conf,C个onehot)
+def create_yolo_target(label):#制作target,形状:[grid_size,grid_size,5,(4+1+C)],其中(4+1+C)包括(tx,ty,tw,th,conf,C个onehot)
     #预测框bx=cx+σ(tx),by=cy+σ(ty),bw=pw*e^tw,bh=ph*e^th,其中(cx,cy),(pw,ph)分别为网格左上角xy坐标与锚框宽高
     clses=label["clses"].long()
     bboxes=label["bboxes"]
@@ -135,8 +136,10 @@ def create_yolo_target(label):#制作target,形状:[13,13,5,(4+1+C)],其中(4+1+
         config = yaml.safe_load(f)
     nc=config["nc"]
     anchors=config["anchors"]
+    input_size=config["input_size"]
+    grid_size=input_size//32
 
-    target=torch.zeros((13,13,5,5+nc))#初始化target形状,并且置0
+    target=torch.zeros((grid_size,grid_size,5,5+nc))#初始化target形状,并且置0
     for cls,bbox in zip(clses,bboxes):
         x_c,y_c,bw,bh=bbox
         #匹配最佳形状的锚框,假设中心与真实框一致
@@ -152,9 +155,9 @@ def create_yolo_target(label):#制作target,形状:[13,13,5,(4+1+C)],其中(4+1+
                 best_anchor_idx=idx
                 pw=anchor_w
                 ph=anchor_h
-        #真实框在13*13坐标系的中心x,y坐标(未归一)
-        bx=x_c*13
-        by=y_c*13
+        #真实框在grid_size*grid_size坐标系的中心x,y坐标(未归一)
+        bx=x_c*grid_size
+        by=y_c*grid_size
         #负责预测网格的x,y坐标(13*13坐标系中)
         cx=int(bx)
         cy=int(by)

@@ -82,7 +82,8 @@ class OcrLocator(BaseLocator):
             "status_spin": "Status:",
             "note_input": "Note:",
             "ok_button": "确定",
-            "cancel_button": "取消"
+            "cancel_button": "取消",
+            "lock_toggle_button": "锁"
         }
         self._cached_results = None # 缓存OCR结果，实现一次截图多次使用
 
