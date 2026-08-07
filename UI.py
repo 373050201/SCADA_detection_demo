@@ -27,7 +27,11 @@ class EditDialog(QDialog):
         self.setWindowTitle("编辑属性")
         self.setFixedSize(320, 260)
         self.target_data = target_data  # 引用原始数据，修改后直接更新
-        self.target_idx = target_idx  # codex修改：记录当前图元索引，用于切换加锁状态
+        self.target_idx = target_idx  # 记录当前图元索引，用于切换加锁状态
+        # 保存父窗口的原始锁状态（用于取消时恢复）
+        self.original_is_locked = is_locked
+        # 暂存锁状态变更意图：None表示不变，True表示需要切换
+        self.pending_lock_change = None
 
         layout = QVBoxLayout(self)
 
@@ -73,16 +77,26 @@ class EditDialog(QDialog):
         btn_ok.clicked.connect(self.accept)
         btn_cancel.clicked.connect(self.reject)
 
-        # codex修改：根据当前图元锁定状态显示加锁/解锁按钮，并在点击后实时刷新UI
+        # 根据当前图元锁定状态显示加锁/解锁按钮，并在点击后实时刷新UI
         self.btn_lock_toggle = QPushButton("解锁" if is_locked else "加锁")
         self.btn_lock_toggle.setObjectName("lock_toggle_button")# 设置加锁/解锁按钮对象名称
         layout.addWidget(self.btn_lock_toggle)
         self.btn_lock_toggle.clicked.connect(self.toggle_lock)
 
     def toggle_lock(self):
-        # codex修改：切换当前图元的加锁状态，并同步更新按钮文字
-        is_locked = self.parent().toggle_target_lock(self.target_idx)
-        self.btn_lock_toggle.setText("解锁" if is_locked else "加锁")
+        """切换暂存的锁状态，仅更新按钮文字，不修改父窗口"""
+        if self.pending_lock_change is None:
+            # 第一次点击：相对于原始状态切换
+            self.pending_lock_change = True
+        else:
+            # 再次点击：取消之前的暂存
+            self.pending_lock_change = not self.pending_lock_change
+        # 根据暂存状态计算按钮应显示的文字
+        if self.pending_lock_change is True: # 如果 pending_lock_change 为 True
+            final_locked = not self.original_is_locked # 表示最终状态与原始状态相反
+        else: # 否则与原始状态相同
+            final_locked = self.original_is_locked
+        self.btn_lock_toggle.setText("解锁" if final_locked else "加锁")
 
     def accept(self):
         # 验证并更新数据
@@ -94,6 +108,13 @@ class EditDialog(QDialog):
             self.target_data[4] = new_id
             self.target_data[5] = new_status
             self.target_data[6] = new_note
+
+            # 如果有锁的状态变更，则应用
+            if self.pending_lock_change:
+                # 调用父窗口的 toggle_target_lock 一次，它会翻转当前锁状态
+                # 由于我们暂存的是“需要切换一次”，所以正好匹配
+                self.parent().toggle_target_lock(self.target_idx)
+
             super().accept()
         except Exception as e:
             QMessageBox.warning(self, "错误", f"数据无效：{str(e)}")
@@ -149,17 +170,27 @@ class DemoWithLines(QWidget):
         # unlock 按钮
         self.btn_unlock = QPushButton("unlock", self)
         self.btn_unlock.clicked.connect(self.on_unlock_clicked)
-        # unlock按钮位置，位于 detect 按钮正下方
+        # unlock按钮位置
         self.btn_unlock.move(self.width() - 100, 52)
         self.btn_unlock.resize(100, 32)
+        # lock by number按钮
+        self.btn_lock_by_number = QPushButton("lock by number", self)
+        self.btn_lock_by_number.clicked.connect(self.on_lock_by_number_clicked)
+        # lock by number按钮位置
+        self.btn_lock_by_number.move(self.width()-200, 94)
+        self.btn_lock_by_number.resize(200, 32)
+        # fill by number按钮
+        self.btn_fill_by_number = QPushButton("fill by number", self)
+        self.btn_fill_by_number.clicked.connect(self.on_fill_by_number_clicked)
+        # fill by number按钮位置
+        self.btn_fill_by_number.move(self.width()-200, 136)
+        self.btn_fill_by_number.resize(200, 32)
         # 类别列表
         with open("models/config.yaml", 'r') as f:
             config = yaml.safe_load(f)
         self.cls_list = config["cls_list"]
         # 存储检测到的中心点（用于绘制检测点）
         self.detected_points = []  # 每个元素为 (x_pixel, y_pixel)
-        # 属性自动填充开关
-        self.auto_fill_enabled = False
 
     def _generate_targets(self):
         targets = []
@@ -417,25 +448,8 @@ class DemoWithLines(QWidget):
         dialog.setModal(False) # 改为非模态
         dialog.show() # 显示但不阻塞
 
-        # 下方为测试，随时删
-        # # 自动填充从策略引擎获得的新值
-        # if self.auto_fill_enabled:# 如果自动填充标志为True
-        #     cls_id=target[0]
-        #     current_id=target[4]
-        #     current_status=target[5]
-        #     current_note=target[6]
-        #     new_values=self.strategy_engine.generate_new_values([cls_id, current_id, current_status, current_note])
-        #     # 延迟后自动点击输入框并填入内容，QTimer起点时刻为调用时刻，msec为延迟时间
-        #     QTimer.singleShot(300, lambda: self.action_executor.fill_dialog_input(field_values=new_values, dialog=dialog))
-        #     # 如果需要自动切换加锁/解锁
-        #     QTimer.singleShot(4000, lambda: self.action_executor.click_lock_toggle_button(dialog=dialog))
-        #     # 如果需要自动点击确定
-        #     QTimer.singleShot(6000, lambda: self.action_executor.click_ok_button(dialog=dialog))
-        #     # 自动填充完成后，通过对话框关闭信号来复位标志
-        #     dialog.finished.connect(lambda: setattr(self, 'auto_fill_enabled', False))
-
     def toggle_target_lock(self, idx):
-        # codex修改：对话框中的加锁/解锁按钮调用这里，更新锁列表后立即重绘
+        # 对话框中的加锁/解锁按钮调用这里，更新锁列表后立即重绘
         if idx in self.locked_indices:
             self.locked_indices.remove(idx)
             is_locked = False
@@ -443,7 +457,44 @@ class DemoWithLines(QWidget):
             self.locked_indices.append(idx)
             is_locked = True
         self.update()
-        return is_locked
+        
+    @staticmethod
+    def associate_one_to_one(points, texts):
+        """
+        贪心匹配：将图元与文本一一对应，每个文本只分配给最近的图元。
+        输入：
+            points: list of [x, y, cls, text]  图元列表，text初始为空
+            texts: list of [x, y, cls, text]  文本列表，text为OCR结果
+        输出：
+            list of [x, y, cls, text]  关联后的图元信息，供策略引擎使用
+        """
+        # 1. 如果没有图元或文本，直接返回空列表
+        if not points or not texts:
+            return []
+        # 2. 构建所有可能的配对 (距离dist, 图元索引point_idx, 文本索引text_idx)
+        pairs = []
+        for point_idx, point in enumerate(points):
+            point_x, point_y = point[0], point[1] # 图元中心坐标
+            for text_idx, text in enumerate(texts):
+                text_x, text_y = text[0], text[1] # 文本中心坐标
+                dist = ((point_x - text_x) ** 2 + (point_y - text_y) ** 2) ** 0.5 # 欧氏距离
+                pairs.append((dist, point_idx, text_idx))
+        # 3. 按距离从小到大排序（距离越近越优先匹配）
+        pairs.sort(key=lambda x: x[0])
+        # 4. 记录哪些图元和文本已经被分配
+        assigned_point = set()
+        assigned_text = set()
+        # 5. 准备结果列表，初始化为 [x, y, cls, ""]（text先占位）
+        associated = [[point[0], point[1], point[2], ""] for point in points]
+        # 6. 遍历排序后的配对，进行贪心分配
+        for dist, point_idx, text_idx in pairs:
+            # 如果该图元和该文本都未被占用，则建立关联
+            if point_idx not in assigned_point and text_idx not in assigned_text:
+                associated[point_idx][3] = texts[text_idx][3] # 将文本字符串填入图元
+                assigned_point.add(point_idx) # 标记图元已分配
+                assigned_text.add(text_idx) # 标记文本已分配
+        # 7. 返回关联后的结果（格式为 [x, y, cls, text]）
+        return associated
 
     def on_detect_clicked(self):
         """
@@ -456,11 +507,15 @@ class DemoWithLines(QWidget):
             self.model_svc = ModelService()
         self.btn_detect.hide()# 截图前隐藏按钮
         self.btn_unlock.hide()
+        self.btn_lock_by_number.hide()
+        self.btn_fill_by_number.hide()
         QApplication.processEvents()# 刷新页面
         # 截图当前窗口（得到QPixmap）
         pixmap = self.grab()  # 获取整个窗口的图像
         self.btn_detect.show()# 截图后恢复按钮
         self.btn_unlock.show()
+        self.btn_lock_by_number.show()
+        self.btn_fill_by_number.show()
         # 转换为Qimage并统一为RGBA非预乘格式
         qimage = pixmap.toImage().convertToFormat(QImage.Format_RGBA8888)
         # 将QImage转换为PIL Image（使用内存缓冲区）
@@ -468,28 +523,32 @@ class DemoWithLines(QWidget):
         pil_image = Image.frombuffer("RGBA", (qimage.width(), qimage.height()), buffer, "raw", "RGBA", 0, 1)
         pil_image = pil_image.convert("RGB")
         # 使用视觉服务推理出结果
-        points = self.model_svc.predict(pil_image)# 每个目标的属性，即包含[x, y, cls_idx]的列表，xy为窗口内的位置坐标
-        points=[point for point in points if point[2]!=8]# 过滤cls为Text的目标
-        self.strategy_engine.update_targets(points)# 把points作为targets保存到策略引擎
-        print(f"检测到 {len(points)} 个目标")# 在控制台打印检测结果
+        targets = self.model_svc.predict(pil_image)# 每个目标的信息，即包含[x, y, cls_idx, text]的列表
+        # 分离图元和文本
+        points=[] # 图元信息
+        texts=[] # 文本信息
+        for target in targets:
+            if target[2] == 8: # 若cls为Text
+                texts.append(target)
+            else:
+                points.append(target)
 
-        # 下方为测试，随时删
-        # # 绘制检测点和类别文字
+        # 图元关联文本
+        associated = self.associate_one_to_one(points, texts)
+        self.strategy_engine.update_points(associated)# 把associated作为points保存到策略引擎
+
+        print(f"检测到 {len(associated)} 个图元")# 在控制台打印检测结果
+
+        # # （debug）绘制检测点和类别文字
         # self.detected_points = points
         # self.update()# 触发paintEvent
-        # # 一些动作
-        # self.auto_fill_enabled = True# 自动填充置True
-        # # 鼠标移动并点击0号目标处（根据策略决定）
-        # x, y=self.strategy_engine.get_action_target_demo()# 通过策略引擎，获取目标位置
-        # self.action_executor.click_at_window_point(self, x, y)# 通过动作执行，移动鼠标并点击目标
 
     def on_unlock_clicked(self):
         """点击unlock按钮后，自动解锁所有已加锁图元"""
-        coords=self.strategy_engine.get_all_locked_target()
-        if coords is None:
+        coords=self.strategy_engine.get_all_locked_point()
+        if coords is None or len(coords)==0:
             print("未检测到locked目标")
             return
-        
         print(f"检测到{len(coords)}个locked目标")
         # 递归处理队列
         def process_next(idx):
@@ -513,7 +572,71 @@ class DemoWithLines(QWidget):
         # 从第一个开始
         process_next(0)
 
-            
+    def on_lock_by_number_clicked(self):
+        """点击lock by number按钮后，自动加锁所有指定number且未加锁的图元"""
+        assign = "000001" # 指定number
+        # 从策略引擎得到所有number为assign且未加锁的图元坐标
+        coords=self.strategy_engine.get_unlocked_point_by_number(assign)
+        if coords is None or len(coords)==0:
+            print(f"未检测到number为{assign}且未加锁的目标")
+            return
+        print(f"检测到{len(coords)}个number为{assign}且未加锁的目标")
+        # 递归处理队列
+        def process_next(idx):
+            if idx >= len(coords):
+                print("全部加锁完成")
+                return
+            x, y = coords[idx]
+            print(f"正在加锁第 {idx+1} 个目标，坐标 ({x}, {y})")
+            # 第一步：点击目标，弹出编辑对话框
+            self.action_executor.click_at_window_point(self, x, y)
+            # 第二步：等待对话框出现（约800ms），点击“锁”按钮切换状态
+            QTimer.singleShot(800, lambda: (
+                self.action_executor.click_lock_toggle_button(),
+                # 第三步：等待锁状态生效（约500ms），点击“确定”关闭对话框
+                QTimer.singleShot(500, lambda: (
+                    self.action_executor.click_ok_button(),
+                    # 第四步：等待对话框关闭（约500ms），处理下一个
+                    QTimer.singleShot(500, lambda: process_next(idx + 1))
+                ))
+            ))
+        # 从第一个开始
+        process_next(0)
+
+    def on_fill_by_number_clicked(self):
+        """点击fill by number按钮后，自动为指定number的图元填充新属性"""
+        assign = "000001" # 指定number
+        # 从策略引擎得到所有number为assign的图元坐标
+        coords=self.strategy_engine.get_point_by_number(assign)
+        if coords is None or len(coords)==0:
+            print(f"未检测到number为{assign}的目标")
+            return
+        print(f"检测到{len(coords)}个number为{assign}的目标")
+        # 从策略引擎得到每个图元属性框的新值
+        new_values=self.strategy_engine.generate_new_values()
+        new_values["id_input"]=assign
+         # 递归处理队列
+        def process_next(idx):
+            if idx >= len(coords):
+                print("全部填充完成")
+                return
+            x, y = coords[idx]
+            print(f"正在填充第 {idx+1} 个目标，坐标 ({x}, {y})")
+            # 第一步：点击目标，弹出编辑对话框，自动填充
+            self.action_executor.click_at_window_point(self, x, y)
+            # 第二步：等待对话框出现后，填充
+            QTimer.singleShot(800, lambda: (
+                self.action_executor.fill_dialog_input(new_values),
+                # 第三步：点击“确定”关闭对话框
+                QTimer.singleShot(500, lambda: (
+                    self.action_executor.click_ok_button(),
+                    # 第四步：等待对话框关闭，处理下一个
+                    QTimer.singleShot(500, lambda: process_next(idx + 1))
+                ))
+            ))
+        # 从第一个开始
+        process_next(0)
+
 
 def main():
     app = QApplication(sys.argv)

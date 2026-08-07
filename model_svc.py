@@ -6,6 +6,7 @@ import yaml
 from models.model import GridAnchorDetector
 from torchvision import transforms
 from models.calculate import nms_cross_cls
+from rapidocr import RapidOCR
 
 
 
@@ -21,10 +22,17 @@ class ModelService:
         self.detector = GridAnchorDetector().cuda()
         self.detector.load_state_dict(torch.load(model_path))
         self.detector.eval()
+
+        self.ocr_engine = RapidOCR(# 初始化文本识别引擎
+        params={
+            "EngineConfig.onnxruntime.providers": ["CUDAExecutionProvider",],
+            "EngineConfig.onnxruntime.cuda_ep_cfg": {"device_id": 0}
+        }
+)
     
     def predict(self, pil_image, conf_thresh=0.72, iou_thresh=0.2):
         """
-        预处理、推理、NMS全部在此完成，返回像素坐标列表 [(px, py, cls), ...]
+        预处理、推理、NMS全部在此完成，返回目标信息列表 [(px, py, cls, text), ...]
         :param pil_image: 原始图像
         :param conf_thresh: 若conf大于此值，判断为正样本
         :param iou_thresh: 若iou大于此值，判断为重叠框
@@ -59,9 +67,26 @@ class ModelService:
         bboxes = nms_cross_cls(bboxes, iou_thresh)
         # 5. 将归一化的中心坐标转换为窗口像素坐标
         W, H = pil_image.size  # 注意：截图尺寸等于窗口尺寸
-        points = []#像素坐标列表，xy是目标在主界面客户区的坐标
-        for x_c, y_c, _, _, _, cls in bboxes:
+        targets = []# 目标信息列表
+        for x_c, y_c, w, h, _, cls in bboxes:
+            # 目标在主界面客户区的中心坐标
             px = int(x_c * W)
             py = int(y_c * H)
-            points.append((px, py, cls))
-        return points
+            # bbox左上角和右下角坐标，用于裁剪
+            x1 = int((x_c - w/2) * W)
+            y1 = int((y_c - h/2) * H)
+            x2 = int((x_c + w/2) * W)
+            y2 = int((y_c + h/2) * H)
+            # 文本内容
+            text = "" # 默认为空
+            if cls == 8: # 仅对文本类别做文字识别
+                # 裁剪子图
+                crop_box = (x1, y1, x2, y2)
+                cropped_img=pil_image.crop(crop_box)
+                # 通过OCR引擎
+                result = self.ocr_engine(cropped_img)
+                if result and len(result.txts)>0:
+                    text = result.txts[0].strip() # 默认取第一个预测结果
+                    
+            targets.append((px, py, cls,text))
+        return targets
