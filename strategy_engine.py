@@ -66,13 +66,17 @@ class StrategyEngine:
                 results.append((point[0], point[1]))
         return results
 
-    def generate_new_values(self)-> dict:
+    def generate_new_values(self, old_values: dict = None)-> dict:
         """
         根据预设规则生成新的属性值。
-        返回字典，例如 {"id_input": "DEV001", "status_spin": 100, "note_input": "Updated"}
+        old_values: 旧属性，例如 {"id_input": "000001", "status_spin": 1, "note_input": "old note"}
+        返回新属性字典，例如 {"id_input": "000001", "status_spin": 100, "note_input": "Updated"}
         """
+        # 此处可以根据旧属性制定新属性
+        ...
+        
         new_values={}#新值
-        new_values["id_input"]="DEV001"
+        new_values["id_input"]=old_values["id_input"]
         new_values["status_spin"]=100
         new_values["note_input"]="Updated"
 

@@ -609,19 +609,29 @@ class DemoWithLines(QWidget):
         # 从策略引擎得到所有number为assign的图元坐标
         coords=self.strategy_engine.get_point_by_number(assign)
         if coords is None or len(coords)==0:
-            print(f"未检测到number为{assign}的目标")
+            print(f"未检测到number为{assign}的图元")
             return
-        print(f"检测到{len(coords)}个number为{assign}的目标")
-        # 从策略引擎得到每个图元属性框的新值
-        new_values=self.strategy_engine.generate_new_values()
-        new_values["id_input"]=assign
+        print(f"检测到{len(coords)}个number为{assign}的图元")
          # 递归处理队列
         def process_next(idx):
             if idx >= len(coords):
                 print("全部填充完成")
                 return
             x, y = coords[idx]
-            print(f"正在填充第 {idx+1} 个目标，坐标 ({x}, {y})")
+            print(f"正在填充第 {idx+1} 个图元，坐标 ({x}, {y})")
+            # 找到当前填充的图元
+            target = min(
+                self.targets,
+                key=lambda t: (t[1] - x) ** 2 + (t[2] - y) ** 2
+            )
+            # 获取当前图元的旧属性
+            old_values = {
+                "id_input": target[4],
+                "status_spin": target[5],
+                "note_input": target[6],
+            }
+            # 从策略引擎根据旧属性得到每个图元属性框的新值
+            new_values = self.strategy_engine.generate_new_values(old_values)
             # 第一步：点击目标，弹出编辑对话框，自动填充
             self.action_executor.click_at_window_point(self, x, y)
             # 第二步：等待对话框出现后，填充
