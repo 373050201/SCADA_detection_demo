@@ -1,0 +1,13 @@
+train: images/train
+val: images/val
+
+names:
+  0: RD
+  1: RS
+  2: GD
+  3: GS
+  4: RDL
+  5: RSL
+  6: GDL
+  7: GSL
+  8: Text

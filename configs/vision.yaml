@@ -1,8 +1,8 @@
 # Vision engine config: selects the detector and defines shared classes and OCR settings.
 detector:
-  name: grid_anchor
-  config_path: models/detectors/grid_anchor/config.yaml
-  model_path: models/weights/best_GridAnchor.pth
+  name: yolo11
+  config_path: models/detectors/yolo11/config.yaml
+  model_path: models/weights/best_yolo11s.pt
 ocr:
   text_class_id: 8
 cls_list: [RD, RS, GD, GS, RDL, RSL, GDL, GSL, Text]
