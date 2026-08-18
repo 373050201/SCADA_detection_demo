@@ -34,7 +34,7 @@ def calculate_kmeans(dataset,write_yaml=False,k=5):#计算数据集的k种初始
 
 
 
-def nms(bboxes,iou_threshold=0.5):#非极大值抑制(向量化版),bboxes:[x_c,y_c,w,h,conf,cls]的列表
+def example_nms(bboxes,iou_threshold=0.5):#学习用：非极大值抑制(同类别),bboxes:[x_c,y_c,w,h,conf,cls]的列表
     if len(bboxes)==0:
         return []
     bboxes=torch.tensor(bboxes)#转换为tensor,shape:[N,6]
@@ -61,7 +61,7 @@ def nms(bboxes,iou_threshold=0.5):#非极大值抑制(向量化版),bboxes:[x_c,
 
 
 
-def nms_cross_cls(bboxes, iou_threshold=0.5):#非极大值抑制(跨类别版),bboxes:[x_c,y_c,w,h,conf,cls]的列表
+def example_nms_cross_cls(bboxes, iou_threshold=0.5):#学习用：非极大值抑制(跨类别),bboxes:[x_c,y_c,w,h,conf,cls]的列表
     # 不再按类别分组，直接对所有框排序后 NMS
     bboxes.sort(key=lambda x: x[4], reverse=True)  # 按置信度降序
     remains = []
@@ -69,6 +69,40 @@ def nms_cross_cls(bboxes, iou_threshold=0.5):#非极大值抑制(跨类别版),b
         best = bboxes.pop(0)
         remains.append(best)
         bboxes = [bbox for bbox in bboxes if calculate_iou(best[:4], bbox[:4]) < iou_threshold]
+    return remains
+
+
+
+def nms(bboxes, iou_threshold=0.5):#非极大值抑制(同类别)
+    # 参数bboxes：列表，每个元素为[x_c,y_c,w,h,conf,cls]
+    # 参数iou_threshold：IoU阈值，同类别框之间的IoU大于该值时抑制低置信度框
+    # 输出：经过同类别NMS后保留的bbox列表，元素格式仍为[x_c,y_c,w,h,conf,cls]
+    if len(bboxes) == 0:
+        return []
+    from torchvision.ops import batched_nms, box_convert
+    bboxes_tensor = torch.as_tensor(bboxes, dtype=torch.float32)
+    boxes_xyxy = box_convert(bboxes_tensor[:, :4], in_fmt="cxcywh", out_fmt="xyxy")
+    keep = batched_nms(boxes_xyxy, bboxes_tensor[:, 4], bboxes_tensor[:, 5].long(), iou_threshold)
+    remains = bboxes_tensor[keep].tolist()
+    for bbox in remains:
+        bbox[5] = int(bbox[5])
+    return remains
+    
+
+
+def nms_cross_cls(bboxes, iou_threshold=0.5):#非极大值抑制(跨类别)
+    # 参数bboxes：列表，每个元素为[x_c,y_c,w,h,conf,cls]
+    # 参数iou_threshold：IoU阈值，不同或相同类别框之间的IoU大于该值时抑制低置信度框
+    # 输出：经过跨类别NMS后保留的bbox列表，元素格式仍为[x_c,y_c,w,h,conf,cls]
+    if len(bboxes) == 0:
+        return []
+    from torchvision.ops import nms as torchvision_nms, box_convert
+    bboxes_tensor = torch.as_tensor(bboxes, dtype=torch.float32)
+    boxes_xyxy = box_convert(bboxes_tensor[:, :4], in_fmt="cxcywh", out_fmt="xyxy")
+    keep = torchvision_nms(boxes_xyxy, bboxes_tensor[:, 4], iou_threshold)
+    remains = bboxes_tensor[keep].tolist()
+    for bbox in remains:
+        bbox[5] = int(bbox[5])
     return remains
 
 

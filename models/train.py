@@ -25,10 +25,11 @@ nc=config["nc"]
 mAP_iou_threshold=config["mAP_iou_threshold"]#mAP评估时的iou阈值
 batch_size=config["batch_size"]
 learning_rate=config["learning_rate"]
+grid_size = config["input_size"] // 32# 网格边长
 train_dataset=YoloDataset("train")
 train_loader=DataLoader(train_dataset,batch_size,shuffle=True,drop_last=True)
 val_dataset=YoloDataset("val")
-val_loader=DataLoader(val_dataset,batch_size,shuffle=True,drop_last=True)
+val_loader=DataLoader(val_dataset,batch_size,shuffle=False)
 
 print("正在初始化模型...")
 detector=GridAnchorDetector()
@@ -42,6 +43,10 @@ total_step=0
 epoch=100
 best_mAP=0#最佳mAP
 best_epoch=0#最佳训练轮次
+count=0#早停计数
+patience=15#最多容忍patience个epoch没有改善
+skip_mAP_epochs = 10#前skip_mAP_epochs轮验证阶段不计算mAP
+conf_threshold = 0.5 #置信度大于此值,判断为预测框
 for i in range(epoch):
     print(f"第{i+1}轮训练开始...")
     detector.train()#训练模式
@@ -66,8 +71,6 @@ for i in range(epoch):
     all_preds=[]#所有预测框
     all_tgts=[]#所有目标框
     img_id=0
-    count=0#早停计数
-    patience=15#最多容忍patience个epoch没有改善
     with torch.no_grad():
         for imgs,labels in val_loader:
             imgs=imgs.cuda()
@@ -76,11 +79,15 @@ for i in range(epoch):
             preds=detector(imgs)
             val_loss=loss(preds,labels)
             total_val_loss+=val_loss
+
+            if i+1<=skip_mAP_epochs:#当前轮次小于skip_mAP_epochs，则不计算mAP
+                continue
+
             #评估mAP
-            for b in range(batch_size):
+            for b in range(imgs.size(0)):
                 init_preds=[]#暂存此图nms前的所有预测框
-                for grid_y in range(13):
-                    for grid_x in range(13):
+                for grid_y in range(grid_size):
+                    for grid_x in range(grid_size):
                         for anchor_idx in range(5):
                             anchor_w,anchor_h=anchors[anchor_idx]#锚框宽高
 
@@ -89,20 +96,19 @@ for i in range(epoch):
                                 cls_tgt=torch.argmax(labels[b,grid_y,grid_x,anchor_idx,5:])#目标框类别解码
                                 #目标框bbox解码
                                 tx_tgt,ty_tgt,tw_tgt,th_tgt=labels[b,grid_y,grid_x,anchor_idx,:4]
-                                x_c_tgt=(grid_x+tx_tgt)/13.0
-                                y_c_tgt=(grid_y+ty_tgt)/13.0
+                                x_c_tgt=(grid_x+tx_tgt)/float(grid_size)
+                                y_c_tgt=(grid_y+ty_tgt)/float(grid_size)
                                 w_tgt=anchor_w*torch.exp(tw_tgt)
                                 h_tgt=anchor_h*torch.exp(th_tgt)
                                 all_tgts.append([img_id,x_c_tgt,y_c_tgt,w_tgt,h_tgt,conf_tgt,cls_tgt])#加入所有目标框的列表
 
                             conf_pred=preds[b,grid_y,grid_x,anchor_idx,4]#预测框置信度解码
-                            conf_threshold=0.8 if epoch<10 else 0.5#前10个epoch将置信度阈值设为0.8,此后为0.5,加速训练过程
-                            if conf_pred>conf_threshold:#置信度大于此值,判断为预测框
+                            if conf_pred>conf_threshold:
                                 cls_pred=torch.argmax(preds[b,grid_y,grid_x,anchor_idx,5:])#预测框类别解码
                                 #预测框bbox解码
                                 tx_pred,ty_pred,tw_pred,th_pred=preds[b,grid_y,grid_x,anchor_idx,:4]
-                                x_c_pred=(grid_x+tx_pred)/13.0
-                                y_c_pred=(grid_y+ty_pred)/13.0
+                                x_c_pred=(grid_x+tx_pred)/float(grid_size)
+                                y_c_pred=(grid_y+ty_pred)/float(grid_size)
                                 w_pred=anchor_w*torch.exp(tw_pred)
                                 h_pred=anchor_h*torch.exp(th_pred)
                                 init_preds.append([x_c_pred,y_c_pred,w_pred,h_pred,conf_pred,cls_pred])#存入暂存区
@@ -111,6 +117,11 @@ for i in range(epoch):
                 all_preds.extend(final_preds)#将此图处理后的预测框加入所有预测框的列表
                 img_id+=1
     print(f"验证集总损失：{total_val_loss:.6f}")
+
+    if i+1<=skip_mAP_epochs:
+        print("本轮跳过mAP计算")
+        continue
+
     mAP=calculate_mAP(all_preds,all_tgts,nc,mAP_iou_threshold)#计算mAP
     print(f"mAP@{mAP_iou_threshold}：{mAP:.4f}")
     if mAP>best_mAP:
