@@ -5,3 +5,6 @@ debug
 # Python cache files
 __pycache__/
 *.py[cod]
+
+# Ultralytics dataset cache
+*.cache
