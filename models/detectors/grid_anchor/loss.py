@@ -11,7 +11,7 @@ import torch.nn.functional as F
 class Loss(nn.Module):
     def __init__(self):
         super(Loss, self).__init__()
-        with open("models/config.yaml", 'r') as f:
+        with open("models/detectors/grid_anchor/config.yaml", 'r') as f:
             config = yaml.safe_load(f)
         self.nc = config["nc"]  # 类别数
 

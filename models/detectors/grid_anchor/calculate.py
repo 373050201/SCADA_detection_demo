@@ -25,10 +25,10 @@ def calculate_kmeans(dataset,write_yaml=False,k=5):#计算数据集的k种初始
     anchors=[[round(w,4),round(h,4)] for w,h in anchors]#保留四位小数
     print(f"所有锚框：{anchors}")
     if write_yaml:#将anchors写入yaml
-        with open("models/config.yaml","r") as f:
+        with open("models/detectors/grid_anchor/config.yaml","r") as f:
             config=yaml.safe_load(f)
         config["anchors"]=anchors
-        with open("models/config.yaml","w") as f:
+        with open("models/detectors/grid_anchor/config.yaml","w") as f:
             yaml.dump(config,f,default_flow_style=None,sort_keys=False)
     return anchors
 
@@ -170,7 +170,7 @@ def visualize_bbox(img,bboxes,color="green"):#可视化bboxes,bboxes:[x_c,y_c,w,
     if type(img)==torch.Tensor:
         img=transforms.ToPILImage()(img)#将img转化为PIL格式
     W,H=img.size
-    with open("models/config.yaml",'r') as f:
+    with open("models/detectors/grid_anchor/config.yaml",'r') as f:
         config=yaml.safe_load(f)
     cls_list=config["cls_list"]
     draw=ImageDraw.Draw(img)#创建Draw类的对象

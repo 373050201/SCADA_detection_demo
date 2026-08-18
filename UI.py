@@ -186,7 +186,7 @@ class DemoWithLines(QWidget):
         self.btn_fill_by_number.move(self.width()-200, 136)
         self.btn_fill_by_number.resize(200, 32)
         # 类别列表
-        with open("models/config.yaml", 'r') as f:
+        with open("configs/vision.yaml", 'r') as f:
             config = yaml.safe_load(f)
         self.cls_list = config["cls_list"]
         # 存储检测到的中心点（用于绘制检测点）

@@ -2,13 +2,13 @@
 模型训练
 评估标准：mAP@0.5
 """
-from loss import Loss
-from model import GridAnchorDetector
-from yolo_dataset import YoloDataset
+from models.detectors.grid_anchor.loss import Loss
+from models.detectors.grid_anchor.network import GridAnchorDetector
+from models.detectors.grid_anchor.dataset import YoloDataset
+from models.detectors.grid_anchor.calculate import calculate_mAP, calculate_kmeans, nms
 import yaml
 from torch.utils.data import DataLoader
 import torch
-from calculate import calculate_mAP, calculate_kmeans, nms
 import time
 
 
@@ -18,7 +18,7 @@ train_dataset=YoloDataset(split="train",label_transform="no_transform")
 calculate_kmeans(train_dataset,write_yaml=True)
 
 print("正在加载训练/验证集...")
-with open("models/config.yaml",'r') as f:
+with open("models/detectors/grid_anchor/config.yaml",'r') as f:
     config=yaml.safe_load(f)
 anchors=config["anchors"]
 nc=config["nc"]
@@ -128,7 +128,7 @@ for i in range(epoch):
         best_mAP=mAP
         best_epoch=i+1
         count=0
-        torch.save(detector.state_dict(),f"./models/best_mAP@{mAP_iou_threshold}_model.pth")
+        torch.save(detector.state_dict(),f"./models/weights/best_GridAnchor.pth")
     else:
         count+=1
         if count>=patience:

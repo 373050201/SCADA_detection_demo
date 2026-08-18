@@ -15,7 +15,7 @@ import numpy as np
 
 class YoloDataset(Dataset):
     def __init__(self, split, img_transform=None, label_transform=None):  # split:"train","val"
-        with open("models/config.yaml", 'r') as f:
+        with open("models/detectors/grid_anchor/config.yaml", 'r') as f:
             config = yaml.safe_load(f)
         self.img_folder = os.path.join("datasets", config["dataset_name"], "images", split)
         self.label_folder = os.path.join("datasets", config["dataset_name"], "labels", split)
@@ -61,7 +61,7 @@ class YoloDataset(Dataset):
                 nc += 1
         config["nc"] = nc
         config["cls_list"] = cls_list
-        with open("models/config.yaml", 'w') as f:
+        with open("models/detectors/grid_anchor/config.yaml", 'w') as f:
             yaml.dump(config, f, default_flow_style=None, sort_keys=False)  # 写回yaml
 
     def __len__(self):
@@ -132,7 +132,7 @@ def create_yolo_target(label):#制作target,形状:[grid_size,grid_size,5,(4+1+C
     #预测框bx=cx+σ(tx),by=cy+σ(ty),bw=pw*e^tw,bh=ph*e^th,其中(cx,cy),(pw,ph)分别为网格左上角xy坐标与锚框宽高
     clses=label["clses"].long()
     bboxes=label["bboxes"]
-    with open("models/config.yaml", 'r') as f:
+    with open("models/detectors/grid_anchor/config.yaml", 'r') as f:
         config = yaml.safe_load(f)
     nc=config["nc"]
     anchors=config["anchors"]

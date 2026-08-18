@@ -14,7 +14,7 @@ class GridAnchorDetector(nn.Module):
     def __init__(self):
         super(GridAnchorDetector,self).__init__()
         resnet=models.resnet18()
-        with open("models/config.yaml",'r') as f:
+        with open("models/detectors/grid_anchor/config.yaml",'r') as f:
             config=yaml.safe_load(f)
         self.nc=config["nc"]#类别数
         self.input_size=config["input_size"]#模型输入图像的尺寸

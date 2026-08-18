@@ -1,27 +1,22 @@
 """
 视觉服务模块：用目标检测模型定位主界面目标位置
 """
-import torch
 import yaml
-from models.model import GridAnchorDetector
-from torchvision import transforms
-from models.calculate import nms_cross_cls
+from models.loader import load_detector
 from rapidocr import RapidOCR
 
 
 
 class ModelService:
-    def __init__(self, model_path="models/best_mAP@0.5_model.pth"):
-        with open("models/config.yaml") as f:
+    def __init__(self, model_path=None):
+        with open("configs/vision.yaml") as f:
             config = yaml.safe_load(f)
-        self.anchors = config["anchors"]
         self.cls_list = config["cls_list"]
-        self.input_size = config["input_size"]# 输入图像尺寸
-
-        self.grid_size=self.input_size//32# 网格尺寸
-        self.detector = GridAnchorDetector().cuda()
-        self.detector.load_state_dict(torch.load(model_path))
-        self.detector.eval()
+        self.text_class_id = config["ocr"]["text_class_id"]
+        detector_config = config["detector"]
+        if model_path is None:
+            model_path = detector_config["model_path"]
+        self.detector = load_detector(detector_config["name"],detector_config["config_path"],model_path)
 
         self.ocr_engine = RapidOCR(# 初始化文本识别引擎
         params={
@@ -37,49 +32,20 @@ class ModelService:
         :param conf_thresh: 若conf大于此值，判断为正样本
         :param iou_thresh: 若iou大于此值，判断为重叠框
         """
-        # 1. 预处理图像（resize到input_size×input_size，转为tensor）
-        transform = transforms.Compose([
-            transforms.Resize((self.input_size, self.input_size)),
-            transforms.ToTensor()
-        ])
-        img_tensor = transform(pil_image).unsqueeze(0).cuda()  # [1, 3, input_size, input_size]
-        # 2. 推理
-        with torch.no_grad():
-            pred = self.detector(img_tensor)
-        pred = pred[0]  # [grid_size, grid_size, 5, 5+C]
-        # 3. 解析预测结果，收集正样本
-        bboxes = []
-        for grid_y in range(self.grid_size):
-            for grid_x in range(self.grid_size):
-                for anchor_idx in range(5):
-                    anchor_w, anchor_h = self.anchors[anchor_idx]
-                    conf = pred[grid_y, grid_x, anchor_idx, 4]
-                    if conf > conf_thresh:
-                        tx, ty, tw, th = pred[grid_y, grid_x, anchor_idx, :4]
-                        cls = torch.argmax(pred[grid_y, grid_x, anchor_idx, 5:]).item()
-                        x_c = (grid_x + tx) / float(self.grid_size)
-                        y_c = (grid_y + ty) / float(self.grid_size)
-                        w = anchor_w * torch.exp(tw)
-                        h = anchor_h * torch.exp(th)
-                        bboxes.append([x_c.item(), y_c.item(), w.item(), h.item(),
-                                        conf.item(), cls])
-        # 4. NMS
-        bboxes = nms_cross_cls(bboxes, iou_thresh)
-        # 5. 将归一化的中心坐标转换为窗口像素坐标
-        W, H = pil_image.size  # 注意：截图尺寸等于窗口尺寸
+        detections = self.detector.predict(pil_image,conf_thresh,iou_thresh)
         targets = []# 目标信息列表
-        for x_c, y_c, w, h, _, cls in bboxes:
+        for detection in detections:
             # 目标在主界面客户区的中心坐标
-            px = int(x_c * W)
-            py = int(y_c * H)
+            px,py = detection.center
+            cls = detection.class_id
             # bbox左上角和右下角坐标，用于裁剪
-            x1 = int((x_c - w/2) * W)
-            y1 = int((y_c - h/2) * H)
-            x2 = int((x_c + w/2) * W)
-            y2 = int((y_c + h/2) * H)
+            x1 = int(detection.x1)
+            y1 = int(detection.y1)
+            x2 = int(detection.x2)
+            y2 = int(detection.y2)
             # 文本内容
             text = "" # 默认为空
-            if cls == 8: # 仅对文本类别做文字识别
+            if cls == self.text_class_id: # 仅对文本类别做文字识别
                 # 裁剪子图
                 crop_box = (x1, y1, x2, y2)
                 cropped_img=pil_image.crop(crop_box)
