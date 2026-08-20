@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import torch
+import yaml
 from PIL import Image
 
 
@@ -22,12 +23,10 @@ NMS_IOU_THRESHOLD=0.2#模型NMS的IoU阈值
 
 DETECTORS={
     "grid_anchor":{
-        "config":os.path.join(PROJECT_ROOT,"models","detectors","grid_anchor","config.yaml"),
-        "weights":os.path.join(PROJECT_ROOT,"models","weights","best_GridAnchor.pth")
+        "config":os.path.join(PROJECT_ROOT,"models","detectors","grid_anchor","config.yaml")
     },
     "yolo11":{
-        "config":os.path.join(PROJECT_ROOT,"models","detectors","yolo11","config.yaml"),
-        "weights":os.path.join(PROJECT_ROOT,"models","weights","best_yolo11s.pt")
+        "config":os.path.join(PROJECT_ROOT,"models","detectors","yolo11","config.yaml")
     }
 }
 
@@ -58,14 +57,20 @@ def main():
     for detector_name,paths in DETECTORS.items():
         if not os.path.isfile(paths["config"]):
             raise FileNotFoundError(paths["config"])
-        if not os.path.isfile(paths["weights"]):
-            raise FileNotFoundError(paths["weights"])
+        with open(paths["config"],"r",encoding="utf-8") as config_file:
+            detector_config=yaml.safe_load(config_file)
+        model_path=detector_config.get("model_path")
+        if not model_path:
+            raise ValueError(f"检测器{detector_name}的配置中缺少model_path：{paths['config']}")
+        weights_path=os.path.join(PROJECT_ROOT,model_path)
+        if not os.path.isfile(weights_path):
+            raise FileNotFoundError(weights_path)
 
         print(f"\n正在测试检测器：{detector_name}")
         detector=None
         try:
-            detector=load_detector(detector_name,paths["config"],paths["weights"])
-            weight_size_mib=os.path.getsize(paths["weights"])/(1024**2)#权重文件大小，单位MiB
+            detector=load_detector(detector_name,paths["config"],weights_path)
+            weight_size_mib=os.path.getsize(weights_path)/(1024**2)#权重文件大小，单位MiB
 
             for image_name in image_names[:WARMUP_RUNS]:#预热CUDA内核与模型延迟初始化
                 image_path=os.path.join(IMAGE_FOLDER,image_name)
