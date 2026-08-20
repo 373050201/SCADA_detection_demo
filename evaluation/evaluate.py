@@ -4,28 +4,26 @@
 import os
 import sys
 import time
+import yaml
 from PIL import Image
-
-
-
-PROJECT_ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0,PROJECT_ROOT)
-from models.loader import load_detector
 
 
 
 DETECTOR_NAME="yolo11"#需要评测的检测器：[grid_anchor, yolo11]
 
+PROJECT_ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0,PROJECT_ROOT)
+from models.loader import load_detector
+
 CONFIG_PATH=os.path.join(PROJECT_ROOT,"models","detectors",DETECTOR_NAME,"config.yaml")
-MODEL_PATHS={
-    "grid_anchor":os.path.join(PROJECT_ROOT,"models","weights","best_GridAnchor.pth"),
-    "yolo11":os.path.join(PROJECT_ROOT,"models","weights","best_yolo11s.pt")
-}
-MODEL_PATH=MODEL_PATHS[DETECTOR_NAME]
+with open(CONFIG_PATH,"r",encoding="utf-8") as f:
+    detector_config=yaml.safe_load(f)
+MODEL_PATH=os.path.join(PROJECT_ROOT,detector_config["model_path"])
 DATASET_PATH=os.path.join(PROJECT_ROOT,"datasets","SCADA_yolo")
 CONF_THRESH=0.05#收集预测框的置信度下限
 NMS_IOU_THRESHOLD=0.45#模型NMS的IoU阈值
 IOU_THRESHOLD=0.5
+MAP_IOU_THRESHOLDS=[round(0.5+0.05*i,2) for i in range(10)]
 
 
 
@@ -59,7 +57,7 @@ def calculate_iou(bbox1,bbox2):#计算两个xyxy格式bbox的IoU
     area1=(bbox1[2]-bbox1[0])*(bbox1[3]-bbox1[1])
     area2=(bbox2[2]-bbox2[0])*(bbox2[3]-bbox2[1])
     union=area1+area2-inter
-    return inter/union
+    return inter/union if union>0 else 0.0
 
 
 
@@ -76,54 +74,92 @@ def calculate_ap(recalls,precisions):#使用全点插值法计算PR曲线下的�
 
 
 
-def calculate_map(all_preds,all_tgts,nc,iou_threshold=0.5):#计算每个类别的AP与mAP
+def match_predictions(preds,tgts,iou_threshold):#按置信度从高到低进行一对一匹配
+    preds=sorted(preds,key=lambda pred:pred[5],reverse=True)
+    tgts_by_image={}
+    for tgt in tgts:
+        tgts_by_image.setdefault(tgt[0],[]).append(tgt)
+    matched={img_id:[False]*len(img_tgts) for img_id,img_tgts in tgts_by_image.items()}
+
+    tp=[0]*len(preds)
+    fp=[0]*len(preds)
+    for pred_idx,pred in enumerate(preds):
+        img_id=pred[0]
+        best_iou=0.0
+        best_tgt_idx=-1
+        for tgt_idx,tgt in enumerate(tgts_by_image.get(img_id,[])):
+            if matched[img_id][tgt_idx]:
+                continue
+            iou=calculate_iou(pred[1:5],tgt[1:5])
+            if iou>best_iou:
+                best_iou=iou
+                best_tgt_idx=tgt_idx
+        if best_iou>=iou_threshold:
+            tp[pred_idx]=1
+            matched[img_id][best_tgt_idx]=True
+        else:
+            fp[pred_idx]=1
+    return tp,fp
+
+
+
+def calculate_class_ap(preds,tgts,iou_threshold):
+    if not tgts:
+        return None
+    tp,fp=match_predictions(preds,tgts,iou_threshold)
+    recalls=[]
+    precisions=[]
+    tp_cum=0
+    fp_cum=0
+    for tp_value,fp_value in zip(tp,fp):
+        tp_cum+=tp_value
+        fp_cum+=fp_value
+        recalls.append(tp_cum/len(tgts))
+        precisions.append(tp_cum/(tp_cum+fp_cum))
+    return calculate_ap(recalls,precisions)
+
+
+
+def calculate_metrics(all_preds,all_tgts,nc,conf_threshold):#计算每个类别的AP、Precision、Recall与F1
     results=[]
     for cls_id in range(nc):
         preds=[pred for pred in all_preds if pred[-1]==cls_id]
         tgts=[tgt for tgt in all_tgts if tgt[-1]==cls_id]
-        preds.sort(key=lambda pred:pred[5],reverse=True)
+        aps={iou_threshold:calculate_class_ap(preds,tgts,iou_threshold) for iou_threshold in MAP_IOU_THRESHOLDS}
 
-        tgts_by_image={}
-        for tgt in tgts:
-            img_id=tgt[0]
-            if img_id not in tgts_by_image:
-                tgts_by_image[img_id]=[]
-            tgts_by_image[img_id].append(tgt)
-        matched={img_id:[False]*len(img_tgts) for img_id,img_tgts in tgts_by_image.items()}
+        operating_preds=[pred for pred in preds if pred[5]>=conf_threshold]
+        tp,fp=match_predictions(operating_preds,tgts,IOU_THRESHOLD)
+        tp_count=sum(tp)
+        fp_count=sum(fp)
+        fn_count=max(0,len(tgts)-tp_count)
+        precision=tp_count/(tp_count+fp_count) if tp_count+fp_count else 0.0
+        recall=tp_count/(tp_count+fn_count) if tp_count+fn_count else 0.0
+        f1=2*precision*recall/(precision+recall) if precision+recall else 0.0
+        valid_aps=[ap for ap in aps.values() if ap is not None]
+        results.append({
+            "class_id":cls_id,
+            "gt_count":len(tgts),
+            "ap50":aps[0.5],
+            "ap75":aps[0.75],
+            "ap50_95":sum(valid_aps)/len(valid_aps) if valid_aps else None,
+            "precision":precision,
+            "recall":recall,
+            "f1":f1
+        })
 
-        tp=[0]*len(preds)
-        fp=[0]*len(preds)
-        for pred_idx,pred in enumerate(preds):
-            img_id=pred[0]
-            best_iou=0.0
-            best_tgt_idx=-1
-            for tgt_idx,tgt in enumerate(tgts_by_image.get(img_id,[])):
-                if matched[img_id][tgt_idx]:
-                    continue
-                iou=calculate_iou(pred[1:5],tgt[1:5])
-                if iou>best_iou:
-                    best_iou=iou
-                    best_tgt_idx=tgt_idx
-            if best_iou>=iou_threshold:
-                tp[pred_idx]=1
-                matched[img_id][best_tgt_idx]=True
-            else:
-                fp[pred_idx]=1
-
-        recalls=[]
-        precisions=[]
-        tp_cum=0
-        fp_cum=0
-        for tp_value,fp_value in zip(tp,fp):
-            tp_cum+=tp_value
-            fp_cum+=fp_value
-            recalls.append(tp_cum/len(tgts))
-            precisions.append(tp_cum/(tp_cum+fp_cum+1e-10))
-        ap=calculate_ap(recalls,precisions)
-        results.append({"class_id":cls_id,"gt_count":len(tgts),"pred_count":len(preds),"ap":ap})
-
-    mAP=sum(result["ap"] for result in results)/len(results)
-    return mAP,results
+    valid_results=[result for result in results if result["gt_count"]>0]
+    if not valid_results:
+        raise ValueError("测试集中没有可用于评估的真实框")
+    summary={
+        "gt_count":sum(result["gt_count"] for result in results),
+        "ap50":sum(result["ap50"] for result in valid_results)/len(valid_results),
+        "ap75":sum(result["ap75"] for result in valid_results)/len(valid_results),
+        "ap50_95":sum(result["ap50_95"] for result in valid_results)/len(valid_results),
+        "precision":sum(result["precision"] for result in valid_results)/len(valid_results),
+        "recall":sum(result["recall"] for result in valid_results)/len(valid_results),
+        "f1":sum(result["f1"] for result in valid_results)/len(valid_results)
+    }
+    return summary,results
 
 
 
@@ -172,15 +208,19 @@ def main():
     print("正在评估测试集...")
     start_time=time.time()#评测计时开始
     all_preds,all_tgts=evaluate(detector,image_folder,label_folder,CONF_THRESH,NMS_IOU_THRESHOLD)
-    mAP,results=calculate_map(all_preds,all_tgts,len(detector.cls_list),IOU_THRESHOLD)
+    summary,results=calculate_metrics(all_preds,all_tgts,len(detector.cls_list),CONF_THRESH)
 
-    print(f"\n{'Class':<10}{'GT':>8}{'Pred':>8}{'AP@0.5':>12}")
-    print("-"*38)
+    print(f"\n{'Class':<10}{'GT':>8}{'AP50':>10}{'AP75':>10}{'AP50-95':>12}{'Precision':>12}{'Recall':>10}{'F1':>10}")
+    print("-"*82)
     for result in results:
         cls_name=detector.cls_list[result["class_id"]]
-        print(f"{cls_name:<10}{result['gt_count']:>8}{result['pred_count']:>8}{result['ap']:>12.4f}")
-    print("-"*38)
-    print(f"mAP@0.5：{mAP:.4f}")
+        if result["gt_count"]==0:
+            print(f"{cls_name:<10}{0:>8}{'N/A':>10}{'N/A':>10}{'N/A':>12}{result['precision']:>12.4f}{result['recall']:>10.4f}{result['f1']:>10.4f}")
+            continue
+        print(f"{cls_name:<10}{result['gt_count']:>8}{result['ap50']:>10.4f}{result['ap75']:>10.4f}{result['ap50_95']:>12.4f}{result['precision']:>12.4f}{result['recall']:>10.4f}{result['f1']:>10.4f}")
+    print("-"*82)
+    print(f"{'all':<10}{summary['gt_count']:>8}{summary['ap50']:>10.4f}{summary['ap75']:>10.4f}{summary['ap50_95']:>12.4f}{summary['precision']:>12.4f}{summary['recall']:>10.4f}{summary['f1']:>10.4f}")
+    print(f"Precision、Recall、F1：IoU={IOU_THRESHOLD:.2f}，置信度阈值={CONF_THRESH:.2f}")
     end_time=time.time()#评测计时结束
     sum_time=end_time-start_time#总用时秒数
     print(f"总用时：{sum_time/60:.2f}min")

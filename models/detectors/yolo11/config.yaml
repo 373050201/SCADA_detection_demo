@@ -1,4 +1,5 @@
 dataset_config: datasets/SCADA_yolo/data.yaml
+model_path: models/weights/best_yolo11s.pt
 pretrained_model: yolo11s.pt
 cleanup_models: [yolo11s.pt, yolo26n.pt]
 input_size: 960
