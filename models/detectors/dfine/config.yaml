@@ -1,0 +1,18 @@
+dataset_path: datasets/SCADA_yolo
+model_path: models/weights/best_DFineS.pth
+pretrained_model: ustc-community/dfine-small-coco
+input_size: 640
+device: 0
+max_det: 300
+epochs: 100
+batch_size: 4
+workers: 0
+patience: 30
+learning_rate: 0.0002
+backbone_learning_rate: 0.0001
+weight_decay: 0.0001
+gradient_clip_norm: 0.1
+metric_conf_thresh: 0.05
+seed: 0
+output_model: models/weights/best_DFineS.pth
+cls_list: [RD, RS, GD, GS, RDL, RSL, GDL, GSL, Text]

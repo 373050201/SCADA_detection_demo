@@ -9,7 +9,7 @@ from PIL import Image
 
 
 
-DETECTOR_NAME="yolo11"#需要评测的检测器：[grid_anchor, yolo11]
+DETECTOR_NAME="dfine"#需要评测的检测器：[grid_anchor, yolo11, dfine]
 
 PROJECT_ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0,PROJECT_ROOT)
@@ -21,6 +21,7 @@ with open(CONFIG_PATH,"r",encoding="utf-8") as f:
 MODEL_PATH=os.path.join(PROJECT_ROOT,detector_config["model_path"])
 DATASET_PATH=os.path.join(PROJECT_ROOT,"datasets","SCADA_yolo")
 CONF_THRESH=0.05#收集预测框的置信度下限
+OPERATING_CONF_THRESH=0.5#计算Precision、Recall与F1的工作置信度阈值
 NMS_IOU_THRESHOLD=0.45#模型NMS的IoU阈值
 IOU_THRESHOLD=0.5
 MAP_IOU_THRESHOLDS=[round(0.5+0.05*i,2) for i in range(10)]
@@ -208,7 +209,7 @@ def main():
     print("正在评估测试集...")
     start_time=time.time()#评测计时开始
     all_preds,all_tgts=evaluate(detector,image_folder,label_folder,CONF_THRESH,NMS_IOU_THRESHOLD)
-    summary,results=calculate_metrics(all_preds,all_tgts,len(detector.cls_list),CONF_THRESH)
+    summary,results=calculate_metrics(all_preds,all_tgts,len(detector.cls_list),OPERATING_CONF_THRESH)
 
     print(f"\n{'Class':<10}{'GT':>8}{'AP50':>10}{'AP75':>10}{'AP50-95':>12}{'Precision':>12}{'Recall':>10}{'F1':>10}")
     print("-"*82)
@@ -220,7 +221,7 @@ def main():
         print(f"{cls_name:<10}{result['gt_count']:>8}{result['ap50']:>10.4f}{result['ap75']:>10.4f}{result['ap50_95']:>12.4f}{result['precision']:>12.4f}{result['recall']:>10.4f}{result['f1']:>10.4f}")
     print("-"*82)
     print(f"{'all':<10}{summary['gt_count']:>8}{summary['ap50']:>10.4f}{summary['ap75']:>10.4f}{summary['ap50_95']:>12.4f}{summary['precision']:>12.4f}{summary['recall']:>10.4f}{summary['f1']:>10.4f}")
-    print(f"Precision、Recall、F1：IoU={IOU_THRESHOLD:.2f}，置信度阈值={CONF_THRESH:.2f}")
+    print(f"Precision、Recall、F1：IoU={IOU_THRESHOLD:.2f}，置信度阈值={OPERATING_CONF_THRESH:.2f}")
     end_time=time.time()#评测计时结束
     sum_time=end_time-start_time#总用时秒数
     print(f"总用时：{sum_time/60:.2f}min")

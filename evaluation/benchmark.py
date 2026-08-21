@@ -27,6 +27,9 @@ DETECTORS={
     },
     "yolo11":{
         "config":os.path.join(PROJECT_ROOT,"models","detectors","yolo11","config.yaml")
+    },
+    "dfine":{
+        "config":os.path.join(PROJECT_ROOT,"models","detectors","dfine","config.yaml")
     }
 }
 
